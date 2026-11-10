@@ -1,0 +1,16 @@
+.venv/
+__pycache__/
+work/
+output/
+input/*
+!input/.gitkeep
+engine/*_bin
+jobs/
+release/
+archive*/
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+.DS_Store

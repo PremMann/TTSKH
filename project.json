@@ -1,0 +1,14 @@
+{
+  "source": "input/source.mp4",
+  "curated_cues": null,
+  "character_prompt": "characters.txt",
+  "model": "gemini-3.8-flash-low",
+  "ocr_workers": 8,
+  "ocr_y_min": 1180,
+  "ocr_y_max": 1350,
+  "blur_y_1080": 1260,
+  "blur_height_1080": 180,
+  "render_subtitles": false,
+  "tts_workers": 8,
+  "watermark": null
+}

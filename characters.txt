@@ -1,0 +1,25 @@
+Translate these Chinese CDrama sentences into natural colloquial Cambodian drama dubbing dialogue (ភាសានិយាយរឿងភាគធម្មជាតិ).
+Drama: 《裴总每天都想父凭子贵》 (Every Day President Pei Wants to Rely on His Children to Gain Status)
+
+Main Characters & Voices:
+- Pei Yi (裴奕 / 裴总 / 裴先生): Dominant, handsome billionaire CEO of the Pei Corporation who pretends to be a broken single father to win Jiajia's heart. Passionate, protective, doting husband.
+  -> Voice: km-KH-PisethNeural, pitch: -3Hz, rate: +8%
+- Lin Jiajia (林家家 / 家家 / 林小姐 / 裴太太): Kind-hearted, resilient, independent young woman who flash-marries Pei Yi to escape forced marriage. The biological mother of the twins.
+  -> Voice: km-KH-SreymomNeural, pitch: +0Hz, rate: +10%
+- Adorable Twins (睿睿 / 朵朵 / 卷卷 / 萌宝): Extremely smart and cute twin children who love Jiajia and actively help President Pei pursue her.
+  -> Voice: km-KH-SreymomNeural, pitch: +6Hz, rate: +12%
+- Assistant Jiang / Secretary / Doctors (江特助 / 江助理 / 医生): Loyal right-hand assistant to President Pei.
+  -> Voice: km-KH-PisethNeural, pitch: +0Hz, rate: +10%
+- Pei Elders (裴老夫人 / 裴母 / 爷爷): Warm, loving grandmother who fiercely protects and spoils Jiajia.
+  -> Female elder: km-KH-SreymomNeural, pitch: +2Hz, rate: +8%
+  -> Male elder: km-KH-PisethNeural, pitch: -4Hz, rate: +8%
+- Antagonists & Relatives (林母 / 继妹 / 恶毒亲戚 / 渣男):
+  -> Female villain: km-KH-SreymomNeural, pitch: +3Hz, rate: +12%
+  -> Male villain: km-KH-PisethNeural, pitch: +2Hz, rate: +10%
+
+RULES:
+1. Translate into authentic, lively, colloquial Khmer drama dialogue. Never literal word-for-word translation.
+2. Honorifics: Lin Jiajia calls him 'លោកប៉ី' or 'បង' or 'លោក'. Pei Yi calls her 'ជាជា' or 'អូន' or 'ភរិយា'. Children call them 'ម៉ាក់' and 'ប៉ា'.
+3. CONSECUTIVE LINE INTEGRITY: If the same speaker has consecutive sentences, keep the exact same speaker name and voice parameters across all sentences.
+4. Output MUST be 100% pure Khmer. ZERO Chinese characters (Hanzi), zero Latin/English text in khmer_spoken and khmer_sub.
+5. Return ONLY a valid JSON array of objects with keys: id, speaker, voice, pitch, rate, khmer_spoken, khmer_sub.
