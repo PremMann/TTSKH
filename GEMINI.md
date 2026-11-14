@@ -20,7 +20,7 @@ running the checks and reporting. Only change code if a check fails, and then ex
 
 - `Start_25method.bat` starts the studio at http://127.0.0.1:2525. `Setup_Windows.bat` creates `.venv` and installs packages.
 - `run.py doctor` checks every requirement. `server.py` + `web/index.html` are the review studio.
-- On Windows the pipeline uses: `engine/ocr_timeline.py` (RapidOCR, Chinese subtitle OCR on CPU),
+- On Windows the pipeline uses: `engine/ocr_timeline.py` (RapidOCR, Chinese subtitle OCR on the GPU through DirectML, or CPU),
   `engine/translate.py` (Gemini through the `agy` CLI), Edge TTS Khmer voices, `engine/render_subs.py`
   (FFmpeg libass, correct Khmer shaping) and `engine/render_sample_universal.py` (FFmpeg libx264).
 - The `.swift` files and `Start_25method.command` are for the Mac only. Ignore them.
@@ -61,9 +61,9 @@ running the checks and reporting. Only change code if a check fails, and then ex
    agy models
    ```
    Expected:
-   - doctor: everything `OK` except `source video` (that is fine until a movie is added).
-   - unittest: 20 of 22 pass. `test_long_line_blocks_without_truncation` and
-     `test_short_replies_and_separate_speakers_are_preserved` are known failures that are not Windows-related. Any other failure is real.
+   - doctor: everything `OK` except `source video` (that is fine until a movie is added), plus `INFO: OCR device: GPU (DirectML)`.
+   - unittest: 21 of 22 pass. `test_long_line_blocks_without_truncation` is a known failure that is not Windows-related.
+     Any other failure is real.
    - smoke test ends with `PASS: full audio, Khmer subtitle rendering, ...` (it runs real OCR on a generated clip; no online services).
    - `agy models` lists Gemini models. If it asks to sign in, tell me to run `agy` and sign in.
 
@@ -90,8 +90,11 @@ the studio. Then remind me of the workflow below.
 1. **+ Add movie**: pick the video, replace the (bracket) placeholders with the drama's characters, fixed English speaker names and voices.
 2. Test a 3-minute clip first: **Prepare full review**. Progress shows under the buttons; **Stop** cancels.
 3. **Picture layout**: check the cover hides the original subtitles (example for a Chinese line above an English line:
-   OCR band 1180–1380, cover top 1200, height 500). OCR and cover values are per drama.
+   OCR band 1180–1380, cover top 1200, height 212 hides only the Chinese line and leaves the English one visible).
+   OCR and cover values are per drama.
 4. Watch **Dubbed review**, fix speakers and lines, **Save corrections**, **Rebuild review**, then **Approve** and **Export**.
 
-Speed on a 6-core CPU: about 45 minutes of OCR plus about 2 hours of rendering per hour of video. With a recent NVIDIA driver,
-setting `TTSKH_VIDEO_ENCODER=h264_nvenc` renders much faster.
+Speed on a 6-core PC with a DirectX 12 graphics card: OCR about 4x faster than real time on the GPU, rendering about real time
+(roughly 1 hour 15 minutes for a 60-minute movie, including translation and voices). `run.py doctor` shows `INFO: OCR device`;
+if it says CPU, run `Setup_Windows.bat` again (it installs `onnxruntime-directml`). With a recent NVIDIA driver,
+setting `TTSKH_VIDEO_ENCODER=h264_nvenc` renders faster still.

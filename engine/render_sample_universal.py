@@ -23,8 +23,20 @@ from pipeline_config import (
     VIDEO_BITRATE_1080P, VIDEO_BITRATE_720P,
     AUDIO_BITRATE, AUDIO_SAMPLE_RATE,
     BLUR_SIGMA_1080P, BLUR_SIGMA_720P,
-    COLOR_CONTRAST, COLOR_SATURATION, FILM_GRAIN, FEATHER_PX_BASE
+    COLOR_CONTRAST, COLOR_SATURATION, FILM_GRAIN, FEATHER_PX_BASE,
+    BLUR_DOWNSCALE, COVER_DARKEN
 )
+
+
+def is_blank_image(path):
+    """True when an overlay image is missing or fully transparent (nothing to draw)."""
+    if not path or not os.path.exists(path):
+        return True
+    try:
+        with Image.open(path) as img:
+            return img.mode in ('RGBA', 'LA') and img.getchannel('A').getextrema()[1] == 0
+    except Exception:
+        return False
 
 def probe_video_dimensions(video_path):
     """Probe input video dimensions to verify aspect ratio."""
@@ -90,9 +102,6 @@ def render_video(video_in, mask_png, sub_concat, watermark_png, audio_in, output
             track = json.load(file)
         blur_h, y_expression = blur_expressions(track, ph, pw / 720)
         print(f"[*] Applying {track.get('mode')} blur track")
-    if not render_subtitles:
-        sub_concat = os.path.join(os.path.dirname(os.path.abspath(output_mp4)), 'no_subtitles.png')
-        Image.new('RGBA', (pw, ph), (0, 0, 0, 0)).save(sub_concat)
 
     # Ensure feather mask is generated in Mode 'L' (grayscale luma gradient for alphamerge)
     need_mask_regen = True
@@ -128,31 +137,52 @@ def render_video(video_in, mask_png, sub_concat, watermark_png, audio_in, output
     # Note: Noise filter uses static/uniform noise to avoid eating video bitrate
     grain_filter = "noise=c0s=2:c0f=u" if "t+u" in FILM_GRAIN else FILM_GRAIN
     
-    filter_complex = (
-        f"[0:v]scale={pw}:{ph}:force_original_aspect_ratio=decrease,pad={pw}:{ph}:(ow-iw)/2:(oh-ih)/2,split=2[v_base][v_crop];"
-        f"[v_crop]crop={pw}:{blur_h}:0:'{y_expression}',gblur=sigma={blur_sigma}[blurred];"
-        f"[blurred][1:v]alphamerge[feathered];"
-        f"[v_base][feathered]overlay=0:y='{y_expression}':eval=frame[clean_v];"
-        f"[clean_v][2:v]overlay=0:0[v_sub];"
-        f"[v_sub]transpose=2,setsar=1,eq=contrast={COLOR_CONTRAST}:saturation={COLOR_SATURATION},{grain_filter}[v_rot];"
-        f"[v_rot][3:v]overlay=x='(W-w)/2+sin(t*0.45)*(W-w)*0.45':y='(H-h)/2+cos(t*0.65)*(H-h)*0.40'[v_out]"
-    )
+    # Blur a small copy and scale it back up: the same soft look as a full-size gblur at a
+    # fraction of the cost. Overlays with nothing to draw (no subtitles, no watermark) are skipped.
+    down = max(1, int(BLUR_DOWNSCALE))
+    small_w, small_h = max(2, pw // down // 2 * 2), max(2, blur_h // down // 2 * 2)
+    blur_chain = (f"scale={small_w}:{small_h}:flags=area,gblur=sigma={blur_sigma / down:.2f}:steps=3,"
+                  f"scale={pw}:{blur_h}:flags=bicubic" if down > 1 else f"gblur=sigma={blur_sigma}")
+    if COVER_DARKEN:
+        blur_chain += f",eq=brightness=-{COVER_DARKEN}"
+    draw_subs = render_subtitles
+    draw_watermark = not is_blank_image(watermark_png)
+
+    inputs = [*(["-ss", "0", "-t", str(duration)] if duration > 0 else ["-ss", "0"]), "-i", video_in,
+              "-loop", "1", "-i", mask_png]
+    index = 2
+    graph = [
+        f"[0:v]scale={pw}:{ph}:force_original_aspect_ratio=decrease,pad={pw}:{ph}:(ow-iw)/2:(oh-ih)/2,split=2[v_base][v_crop]",
+        f"[v_crop]crop={pw}:{blur_h}:0:'{y_expression}',{blur_chain}[blurred]",
+        "[blurred][1:v]alphamerge[feathered]",
+        f"[v_base][feathered]overlay=0:y='{y_expression}':eval=frame[v_sub]",
+    ]
+    if draw_subs:
+        inputs += ["-f", "concat", "-safe", "0", "-i", sub_concat]
+        graph[-1] = graph[-1].replace("[v_sub]", "[clean_v]")
+        graph.append(f"[clean_v][{index}:v]overlay=0:0[v_sub]")
+        index += 1
+    rotate = f"[v_sub]transpose=2,setsar=1,eq=contrast={COLOR_CONTRAST}:saturation={COLOR_SATURATION},{grain_filter}"
+    if draw_watermark:
+        inputs += ["-loop", "1", "-i", watermark_png]
+        graph.append(rotate + "[v_rot]")
+        graph.append(f"[v_rot][{index}:v]overlay=x='(W-w)/2+sin(t*0.45)*(W-w)*0.45':y='(H-h)/2+cos(t*0.65)*(H-h)*0.40'[v_out]")
+        index += 1
+    else:
+        graph.append(rotate + "[v_out]")
+    inputs += ["-i", audio_in]
+    filter_complex = ";".join(graph)
 
     # Mac: VideoToolbox. Elsewhere: libx264, or TTSKH_VIDEO_ENCODER (e.g. h264_nvenc).
     encoder = os.environ.get("TTSKH_VIDEO_ENCODER") or ("h264_videotoolbox" if sys.platform == "darwin" else "libx264")
-    _time_args = ["-ss", "0", "-t", str(duration)] if duration > 0 else ["-ss", "0"]
     cmd = [
         "ffmpeg", "-y",
         "-nostdin",
         *(["-progress", progress_path, "-stats_period", "2"] if progress_path else []),
-        *_time_args, "-i", video_in,
-        "-loop", "1", "-i", mask_png,
-        *(["-f", "concat", "-safe", "0"] if render_subtitles else ["-loop", "1"]), "-i", sub_concat,
-        "-loop", "1", "-i", watermark_png,
-        "-i", audio_in,
+        *inputs,
         "-filter_complex", filter_complex,
         "-map", "[v_out]",
-        "-map", "4:a",
+        "-map", f"{index}:a",
         "-c:v", encoder,
         *(["-preset", "fast"] if encoder == "libx264" else []),
         "-b:v", bitrate,

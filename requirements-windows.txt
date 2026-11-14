@@ -1,1 +1,2 @@
 rapidocr_onnxruntime
+# Setup_Windows.bat then swaps onnxruntime for onnxruntime-directml (GPU OCR on any DirectX 12 card).

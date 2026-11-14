@@ -58,8 +58,10 @@ VIDEO_BITRATE_1080P  = '10000k'  # h264_videotoolbox bitrate
 VIDEO_BITRATE_720P   = '4500k'
 AUDIO_BITRATE        = '192k'
 AUDIO_SAMPLE_RATE    = 48000
-BLUR_SIGMA_1080P     = 18
-BLUR_SIGMA_720P      = 12
+BLUR_SIGMA_1080P     = 40       # cover blur strength (was 18: English text stayed readable)
+BLUR_SIGMA_720P      = 27
+BLUR_DOWNSCALE       = 4        # blur a 1/4-size copy, then scale up: same look, ~2x faster render
+COVER_DARKEN         = 0.05     # slight darkening of the cover band so leftover letter shapes vanish
 COLOR_CONTRAST       = 1.04
 COLOR_SATURATION     = 1.06
 FILM_GRAIN           = 'c0s=3:c0f=t+u'

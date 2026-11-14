@@ -71,7 +71,22 @@ def load_engine():
     # Subtitle strips are thin: detect at their own size (the default upscales them to 736px),
     # skip the rotation classifier, and share CPU threads fairly between parallel workers.
     threads = int(os.environ.get('TTSKH_OCR_THREADS', '0')) or max(1, (os.cpu_count() or 4) // 2)
-    return RapidOCR(det_limit_side_len=640, det_limit_type='max', use_cls=False, intra_op_num_threads=threads)
+    gpu = gpu_available()
+    log(f'OCR device: {"GPU (DirectML)" if gpu else "CPU"}')
+    return RapidOCR(det_limit_side_len=640, det_limit_type='max', use_cls=False, intra_op_num_threads=threads,
+                    det_use_dml=gpu, rec_use_dml=gpu)
+
+
+def gpu_available():
+    """Windows GPU OCR through DirectML (any DirectX 12 GPU: NVIDIA, AMD, Intel).
+    Needs the onnxruntime-directml package; TTSKH_OCR_DEVICE=cpu turns it off."""
+    if os.environ.get('TTSKH_OCR_DEVICE', 'auto').lower() == 'cpu' or sys.platform != 'win32':
+        return False
+    try:
+        import onnxruntime
+        return 'DmlExecutionProvider' in onnxruntime.get_available_providers()
+    except Exception:
+        return False
 
 
 def ocr_lines(engine, img, subtitles_only=True):
@@ -147,6 +162,33 @@ def clean(s):
     for ch in (' ', '，', '。', '！', '？'):
         s = s.replace(ch, '')
     return s
+
+
+def merge_blips(cues, start_t, max_t):
+    """A one-frame cue that is a misread of the line right next to it (a fade-in/out frame
+    read as e.g. half the line) becomes part of that line instead of a separate cue.
+    Real short lines, and cues cut by the scan start/end, are kept."""
+    from difflib import SequenceMatcher
+    cues = list(cues)
+    i = 0
+    while i < len(cues):
+        text, s, e = cues[i]
+        at_edge = s <= start_t + 1e-6 or e >= max_t - 1e-6
+        if e - s <= STEP + 1e-6 and not at_edge:
+            best, best_ratio = None, 0.0
+            for j in (i - 1, i + 1):
+                if 0 <= j < len(cues) and abs((cues[j][1] if j > i else cues[j][2]) - (e if j > i else s)) < 1e-6:
+                    a, b = clean(text), clean(cues[j][0])
+                    ratio = 1.0 if a and a in b else SequenceMatcher(None, a, b).ratio()
+                    if ratio > best_ratio:
+                        best, best_ratio = j, ratio
+            if best is not None and best_ratio >= 0.6:
+                t2, s2, e2 = cues[best]
+                cues[best] = (t2, min(s, s2), max(e, e2))
+                del cues[i]
+                continue
+        i += 1
+    return cues
 
 
 def main(argv):
@@ -239,7 +281,7 @@ def main(argv):
         grouped.append((cur_text, cur_start, min(cur_end + STEP, max_t)))
 
     write_progress(out_json, total_frames, total_frames)
-    cues = [s for s in grouped if s[2] - s[1] > 0]
+    cues = merge_blips([s for s in grouped if s[2] - s[1] > 0], start_t, max_t)
     log(f'\nDetected {len(cues)} visual subtitle cues! ({len(raw_frames)} frames, {ocr_calls} OCR calls)')
     output = [{'id': i + 1, 'start': s, 'end': e, 'duration': e - s, 'chinese': txt}
               for i, (txt, s, e) in enumerate(cues)]

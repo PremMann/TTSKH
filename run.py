@@ -24,7 +24,7 @@ def main():
     if args.stage=='doctor':
         from workflow import use_swift
         checks={n:bool(shutil.which(n)) for n in ['ffmpeg','ffprobe','agy']}
-        checks.update({n:importlib.util.find_spec(n) is not None for n in ['edge_tts','numpy','soundfile','PIL']})
+        checks.update({n:importlib.util.find_spec(n) is not None for n in ['edge_tts','numpy','soundfile','PIL']});notes=[]
         if use_swift():
             checks['swiftc (Apple Vision OCR)']=True
         else:
@@ -36,8 +36,11 @@ def main():
             sys.path.insert(0,str(ROOT/'engine'))
             from render_subs import find_font
             font=find_font();checks[f'Khmer font ({font or "none found"})']=bool(font)
+            from ocr_timeline import gpu_available
+            notes.append(f'OCR device: {"GPU (DirectML)" if gpu_available() else "CPU (install onnxruntime-directml for ~3x faster OCR)"}')
         checks['source video']=project.source.is_file()
         for name,ok in checks.items():print(f'{"OK" if ok else "MISSING"}: {name}')
+        for note in notes:print(f'INFO: {note}')
         return 0 if all(checks.values()) else 1
     if args.stage=='tts':project.tts(args.cue)
     else:getattr(project,{'review':'render_review','render':'export'}.get(args.stage,args.stage))()

@@ -71,6 +71,14 @@ RULES:
 4. Return ONLY a valid JSON array of objects with keys: id, speaker, voice, pitch, rate, khmer_spoken, khmer_sub.
 5. No markdown backticks, no explanatory prose."""
 
+KHMER_CHARS_PER_SECOND = 13   # Edge TTS Khmer voices speak about 12-14 characters per second
+
+
+def max_khmer_chars(seconds):
+    """Longest Khmer line (spaces not counted) that the voice can say in `seconds` without speed-up."""
+    return max(8, int(round(seconds * KHMER_CHARS_PER_SECOND)))
+
+
 def extract_json_from_output(raw_text: str):
     raw_text = raw_text.strip()
     start = raw_text.find('[')
@@ -94,8 +102,12 @@ def translate_batch(batch_cues, batch_idx, total_batches, context=None):
         except Exception:
             pass
 
-    minimal_input = [{"id": c["id"], "chinese": c["chinese"]} for c in batch_cues]
-    prompt = f"{DRAMA_INSTRUCTIONS}\nClassify each entry: add is_spoken_dialogue=false for signs, credits, or other unspoken screen text; use empty khmer_spoken but translate khmer_sub. Keep brief one-character spoken replies. If speaker is uncertain use Unknown; do not invent certainty.\n\nContext (do not translate these again): {json.dumps(context or [], ensure_ascii=False)}\n\nCues:\n{json.dumps(minimal_input, ensure_ascii=False)}"
+    minimal_input = [{"id": c["id"], "chinese": c["chinese"], "seconds": round(c["end"] - c["start"], 2),
+                      "max_khmer_chars": max_khmer_chars(c["end"] - c["start"])} for c in batch_cues]
+    prompt = (f"{DRAMA_INSTRUCTIONS}\nClassify each entry: add is_spoken_dialogue=false for signs, credits, or other unspoken screen text; use empty khmer_spoken but translate khmer_sub. Keep brief one-character spoken replies. If speaker is uncertain use Unknown; do not invent certainty.\n"
+              f"Each entry is ONE subtitle line from the screen; different lines may be different speakers, so decide the speaker of every line separately and never move words between lines.\n"
+              f"TIMING: the Khmer voice must fit the time the Chinese line is on screen (\"seconds\"). Keep khmer_spoken within max_khmer_chars Khmer characters (spaces not counted): use short natural spoken wording, drop filler words and repeated names, keep the meaning and emotion. khmer_sub may be slightly fuller but no more than 1.3x that length.\n\n"
+              f"Context (do not translate these again): {json.dumps(context or [], ensure_ascii=False)}\n\nCues:\n{json.dumps(minimal_input, ensure_ascii=False)}")
     print(f"[{batch_idx}/{total_batches}] Translating scene ({len(batch_cues)} cues: IDs {batch_cues[0]['id']}..{batch_cues[-1]['id']})...")
 
     cmd = [
@@ -167,7 +179,8 @@ def main():
         raw_cues = json.load(handle)
     valid_cues = [c for c in raw_cues if c.get('end', 0) > cutoff and re.search(r'[\u4e00-\u9fff]', c.get('chinese', ''))]
 
-    # Step A: Deduplicate adjacent frame jitter
+    # Step A: merge OCR repeats only: the same line read twice (one or two characters misread),
+    # or a single-frame partial read next to the full line. Real short replies stay separate.
     merged = []
     for c in valid_cues:
         zh = c.get('chinese', '').strip()
@@ -179,7 +192,8 @@ def main():
             last_norm = re.sub(r'[^\w\u4e00-\u9fff]+', '', last['chinese'])
             sim = difflib.SequenceMatcher(None, norm, last_norm).ratio()
             gap = c['start'] - last['end']
-            if (sim > 0.6 or norm in last_norm or last_norm in norm) and gap < 1.6:
+            blip = min(c['end'] - c['start'], last['duration']) <= 0.3
+            if gap < 0.3 and (sim >= 0.85 or (blip and (norm in last_norm or last_norm in norm))):
                 last['end'] = max(last['end'], c['end'])
                 last['duration'] = round(last['end'] - last['start'], 2)
                 if len(zh) > len(last['chinese']):
@@ -194,21 +208,9 @@ def main():
             'original_ids': [c.get('id', 0)]
         })
 
-    # Step B: Sentence fragment rejoining across cuts
-    sentences = []
-    for m in merged:
-        zh = m['chinese'].strip()
-        if sentences:
-            last = sentences[-1]
-            last_zh = last['chinese']
-            gap = m['start'] - last['end']
-            if gap < 0.6 and not re.search(r'[。！？?!]$', last_zh) and (len(last_zh) + len(zh)) <= 24:
-                last['end'] = m['end']
-                last['duration'] = round(last['end'] - last['start'], 2)
-                last['chinese'] = f"{last_zh} {zh}"
-                last['original_ids'].extend(m['original_ids'])
-                continue
-        sentences.append(dict(m))
+    # Each subtitle line stays its own cue. Joining lines into sentences merged two speakers
+    # into one voice; Gemini gets the neighbouring lines as context instead.
+    sentences = [dict(m) for m in merged]
 
     for idx, s in enumerate(sentences, len(verified_15m) + 1):
         s["id"] = idx

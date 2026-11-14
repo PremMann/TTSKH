@@ -47,7 +47,7 @@ irm https://antigravity.google/cli/install.ps1 | iex   # then run: agy   (to sig
 
 Install a Khmer font (Khmer OS Battambang or Kantumruy Pro). Then double-click **Setup_Windows.bat** (creates `.venv`, installs packages, runs the doctor) and afterwards **Start_25method.bat**. Keep the project in a short path such as `C:\TTSKH`; very long paths can break `pip install`.
 
-OCR runs on the CPU and is slower than Apple's Neural Engine. Only the subtitle band is read and unchanged frames are skipped. On Windows at most 4 OCR workers run at once, whatever `ocr_workers` says. Set `TTSKH_SUB_FONT` to a .ttf path to force the subtitle font. On a Mac, `TTSKH_ENGINE=python` uses the same Python engines instead of Swift.
+OCR runs on the GPU through DirectML (`onnxruntime-directml`, installed by `Setup_Windows.bat`; any DirectX 12 card), about 3x faster than the CPU. `TTSKH_OCR_DEVICE=cpu` forces the CPU. Only the subtitle band is read and unchanged frames are skipped. On Windows at most 3 OCR workers run at once, whatever `ocr_workers` says. Set `TTSKH_SUB_FONT` to a .ttf path to force the subtitle font. On a Mac, `TTSKH_ENGINE=python` uses the same Python engines instead of Swift.
 
 ## Full-movie workflow
 

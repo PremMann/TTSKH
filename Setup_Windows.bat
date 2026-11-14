@@ -24,5 +24,11 @@ if errorlevel 1 (
   exit /b 1
 )
 
+rem GPU OCR: DirectML runs on any DirectX 12 graphics card (NVIDIA, AMD, Intel), about 3x faster.
+rem Both packages provide the same module, so remove both first. Falls back to CPU OCR if needed.
+".venv\Scripts\python.exe" -m pip uninstall -y onnxruntime onnxruntime-directml >nul 2>nul
+".venv\Scripts\python.exe" -m pip install onnxruntime-directml
+if errorlevel 1 ".venv\Scripts\python.exe" -m pip install onnxruntime
+
 ".venv\Scripts\python.exe" -X utf8 run.py doctor
 pause
