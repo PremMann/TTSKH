@@ -1,114 +1,97 @@
-# 25method — Gemini handoff for a Windows PC
+# 25method — setup guide for Gemini (Antigravity) on a Windows PC
 
-## Goal
+## Your job
 
-Help me set up and run this Chinese-drama-to-Khmer dubbing project on my PC. Assume Windows 10/11 with PowerShell unless I specify otherwise. Inspect the repository and machine before changing anything. Implement the compatibility changes needed, verify them, and explain how to start the local review studio.
+Set up and verify this Chinese-drama → Khmer dubbing studio on this Windows PC, then tell me how to start it.
 
-This file is a handoff guide, not a completed Windows port. The existing project uses macOS-only components. Installing Python dependencies alone will not make the full pipeline work on Windows.
+**The Windows port is already finished and tested.** Do not rewrite, refactor or "fix" the code: OCR, subtitle rendering,
+translation, the server and the UI all work on Windows. Your work is installing tools, creating the environment,
+running the checks and reporting. Only change code if a check fails, and then explain the failure and ask me first.
 
-## Project overview
+## Rules
 
-- `run.py`: CLI entry point and dependency doctor.
-- `server.py`, `web/`: local browser review studio, normally at http://127.0.0.1:2525.
-- `workflow.py`: project configuration, OCR, translation, speech, review, approval, export.
-- `project.json`: default single-movie settings; paths resolve relative to this file.
-- `characters.txt`: story and casting instructions; update for each drama.
-- `engine/parallel_extract_full_timeline.py`: chunked OCR with retries and resumable results.
-- `engine/auto_extract_timeline.swift`: Apple Vision/AVFoundation Chinese subtitle OCR.
-- `engine/translate.py`: context-aware translation through the `agy` executable.
-- `engine/synthesize_tts_universal.py`, `engine/audio_safe.py`: Edge TTS and speech fitting.
-- `engine/render_subs_universal.swift`: Cocoa/CoreText subtitle graphics and render assets.
-- `engine/render_sample_universal.py`: FFmpeg video rendering.
-- `tests/`, `VALIDATION.md`, `README.md`: existing checks and known limitations.
+- Use PowerShell. Ask before installing anything; tell me what each install is for.
+- Never delete or overwrite my videos, `input/`, `work/`, `jobs/`, `output/` or `project.json` values I set.
+- Never type passwords, tokens or sign-in codes for me. When a sign-in is needed (agy, GitHub), tell me what to do.
+- Do not start a full-movie job or any translation/TTS run without asking: they use online services and quota.
+- Report honestly: a skipped or failed check is not a pass.
 
-Pipeline: source video → visible Chinese subtitle OCR → Khmer translation and casting → speech → full-length review → manual corrections and speaker checks → approval → export.
+## How the project works (for orientation only)
 
-## Preserve my existing work
+- `Start_25method.bat` starts the studio at http://127.0.0.1:2525. `Setup_Windows.bat` creates `.venv` and installs packages.
+- `run.py doctor` checks every requirement. `server.py` + `web/index.html` are the review studio.
+- On Windows the pipeline uses: `engine/ocr_timeline.py` (RapidOCR, Chinese subtitle OCR on CPU),
+  `engine/translate.py` (Gemini through the `agy` CLI), Edge TTS Khmer voices, `engine/render_subs.py`
+  (FFmpeg libass, correct Khmer shaping) and `engine/render_sample_universal.py` (FFmpeg libx264).
+- The `.swift` files and `Start_25method.command` are for the Mac only. Ignore them.
 
-Do not delete or overwrite source videos, archives, existing translations, generated voice clips, review videos, or exports. Inspect `input/`, `work/`, `output/`, `archive_movie_*`, and `jobs/` if present. Back up configuration before editing it. Preserve dialogue history and review gates. Do not start full-movie translation or TTS automatically during setup; these use network services and may incur costs or quotas.
+## Steps
 
-Copy the complete project to the PC, including any media and work I want to continue. A Mac `.venv`, compiled Swift binaries, and `Start_25method.command` are not Windows launchers or portable dependencies. Create a new environment on the PC.
+1. **Check what is installed** (report versions, change nothing yet):
+   ```powershell
+   python --version; git --version; ffmpeg -version | Select-Object -First 1; Get-Command agy -ErrorAction SilentlyContinue
+   nvidia-smi
+   ```
+   Note: `python` may be only the Microsoft Store shortcut; that counts as not installed.
 
-## First inspect the machine
+2. **Install what is missing** (ask me first):
+   - Python 3.12 64-bit: `winget install Python.Python.3.12` (3.13+ is not supported by RapidOCR yet)
+   - Git: `winget install Git.Git`
+   - FFmpeg full build (needs `libx264` and `libass`): `winget install Gyan.FFmpeg`
+   - Antigravity CLI: `irm https://antigravity.google/cli/install.ps1 | iex`, then I run `agy` once and sign in.
+   - A Khmer font: Battambang or Kantumruy Pro (Google Fonts) or Khmer OS Battambang. I install it by right-click → Install.
+   After installs, open a new PowerShell so PATH updates.
 
-Use PowerShell to check Python, FFmpeg, available memory, GPU, and translation tooling. Verify commands actually work, not just that files exist:
+3. **Project location.** The project must be in a short path such as `C:\TTSKH` (long paths break `pip install`).
+   If it is not there yet: `git clone https://github.com/PremMann/TTSKH C:\TTSKH`
 
-```powershell
-py --version
-ffmpeg -version
-ffprobe -version
-Get-Command agy, gemini -ErrorAction SilentlyContinue
-```
+4. **Environment.** Run `Setup_Windows.bat` in `C:\TTSKH`, or the same steps by hand:
+   ```powershell
+   cd C:\TTSKH
+   py -3.12 -m venv .venv
+   .\.venv\Scripts\python.exe -m pip install --upgrade pip
+   .\.venv\Scripts\python.exe -m pip install -r requirements.txt -r requirements-windows.txt
+   ```
 
-Use a supported 64-bit Python version compatible with the chosen OCR dependencies. The current README specifies Python 3.9+, but a new OCR library may require a newer version. Ensure FFmpeg includes `libx264`. Install a Khmer font and verify actual shaping in rendered output.
+5. **Checks** (all from `C:\TTSKH`):
+   ```powershell
+   .\.venv\Scripts\python.exe run.py doctor
+   .\.venv\Scripts\python.exe -m unittest discover -s tests
+   .\.venv\Scripts\python.exe tests\smoke_movie.py
+   agy models
+   ```
+   Expected:
+   - doctor: everything `OK` except `source video` (that is fine until a movie is added).
+   - unittest: 20 of 22 pass. `test_long_line_blocks_without_truncation` and
+     `test_short_replies_and_separate_speakers_are_preserved` are known failures that are not Windows-related. Any other failure is real.
+   - smoke test ends with `PASS: full audio, Khmer subtitle rendering, ...` (it runs real OCR on a generated clip; no online services).
+   - `agy models` lists Gemini models. If it asks to sign in, tell me to run `agy` and sign in.
 
-From the project folder, create a fresh environment. Activation is optional when using its Python directly:
+6. **Optional quick Gemini check** (ask me first, uses a tiny amount of quota):
+   ```powershell
+   agy --model gemini-3.8-flash-low --disable-slash-commands --print "Translate to Khmer, reply with Khmer only: 你好"
+   ```
+   It must print Khmer text. If the model name is not in `agy models`, use one that is and tell me, so I set it in
+   the studio (Story, characters & recovery → Translation model).
 
-```powershell
-py -m venv .venv
-.\.venv\Scripts\python.exe -m pip install --upgrade pip
-.\.venv\Scripts\python.exe -m pip install -r requirements.txt
-```
+7. **Start the studio:** double-click `Start_25method.bat`, or
+   ```powershell
+   .\.venv\Scripts\python.exe -X utf8 -u run.py serve --open-browser
+   ```
+   Keep that window open. The studio is at http://127.0.0.1:2525.
 
-The current requirements are `edge-tts`, `numpy`, `soundfile`, and `Pillow`; they do not provide a Windows OCR backend or a translation client.
+## Report back
 
-## Required compatibility work
+List what you installed, the result of each check (pass / known failure / failed / skipped), and the exact command to start
+the studio. Then remind me of the workflow below.
 
-1. **Portable paths and process handling.** Remove unconditional Mac/user-specific PATH prefixes from `workflow.py`, `engine/translate.py`, and `engine/pipeline_config.py`. Use platform-aware discovery and explicit configurable executables. Audit subprocess calls, UTF-8 text I/O, filenames with spaces, and Windows multiprocessing. Keep process creation under appropriate main guards.
+## Workflow in the studio (for me)
 
-2. **Windows OCR backend.** Apple Vision and AVFoundation cannot be made available by installing Swift on Windows or WSL. Implement a Windows-capable backend, selecting and documenting a Chinese OCR engine after checking its official installation requirements. Preserve the existing extraction contract: timestamps, Chinese text, cue IDs, chunk boundaries, band suggestions, retries, logs, completion markers, and input-sensitive cache invalidation. Inspect the Swift implementation and consumers before defining the replacement. Invalidate incompatible old OCR caches without deleting them. Retain short replies and avoid aggressive merging. Do not silently substitute speech recognition for subtitle OCR.
+1. **+ Add movie**: pick the video, replace the (bracket) placeholders with the drama's characters, fixed English speaker names and voices.
+2. Test a 3-minute clip first: **Prepare full review**. Progress shows under the buttons; **Stop** cancels.
+3. **Picture layout**: check the cover hides the original subtitles (example for a Chinese line above an English line:
+   OCR band 1180–1380, cover top 1200, height 500). OCR and cover values are per drama.
+4. Watch **Dubbed review**, fix speakers and lines, **Save corrections**, **Rebuild review**, then **Approve** and **Export**.
 
-3. **Portable render assets.** Replace the Cocoa/CoreText dependency on Windows with a renderer that correctly shapes Khmer and produces every asset consumed by the existing FFmpeg pipeline. Inspect the Swift implementation for the full output contract, including masks, image names, and timing manifests. `Project.render_review()` currently invokes the Swift renderer even when `render_subtitles` is false; merely disabling subtitles does not remove this dependency. Inspect actual Khmer glyphs visually. Do not assume that a font file alone guarantees correct shaping.
-
-4. **FFmpeg encoding.** The renderer tries `h264_videotoolbox` and falls back to `libx264`. Select a supported encoder for Windows, preserving a reliable software fallback. Hardware encoding is optional. Preserve the inherited 1080×1920 portrait processing canvas followed by 270° clockwise rotation to a 1920×1080 output unless I request a layout change.
-
-5. **Gemini translation integration.** Using Gemini to edit this project does not configure its runtime translator. The current runtime invokes `agy --model ... --disable-slash-commands --print PROMPT`; those flags are not a documented contract for a different CLI. Check the installed tool's help and official documentation. Either retain working `agy` or implement a configurable Gemini CLI/API adapter with explicit authentication instructions, timeout/error handling, UTF-8, and JSON parsing. Never embed credentials or log secrets. Validate returned cue IDs, Khmer text, voice assignments, and context-sensitive caching. The existing `gemini-3.8-flash-low` model string is inherited configuration, not proof of availability; choose a model actually accessible to my account and include the provider/model in cache identity.
-
-6. **Doctor and launcher.** Update `run.py doctor` to check the backend selected on this platform instead of unconditionally requiring `swiftc` and `agy`. Distinguish local dependency checks from authenticated remote tests. Add a Windows launcher using the project's virtual-environment interpreter, with visible errors and correct working-directory handling. Keep the server bound to loopback and retain host/token protections.
-
-Check official documentation for any new dependency or Gemini interface before choosing installation commands. Document new requirements, model downloads, and optional GPU setup. Keep the Mac backend working where practical.
-
-## Movie configuration
-
-The current default source is `input/source.mp4`. Copy my movie there or update `project.json` to its real PC location. JSON Windows paths must use forward slashes or escaped backslashes, for example `D:/Movies/drama.mp4`. Do not reuse `/Users/premmann/...` paths.
-
-Inspect `characters.txt` before translating a new story. Preserve my existing cast if continuing the same drama. OCR and blur coordinates are movie-specific; inspect source frames and the resulting review instead of assuming the existing values fit every movie. `curated_cues` is currently null and `render_subtitles` is currently false.
-
-## Verification before production
-
-Run the existing regression suite, resolve platform failures, and add focused checks for the new backend contracts:
-
-```powershell
-.\.venv\Scripts\python.exe -m unittest discover -s tests -v
-.\.venv\Scripts\python.exe run.py doctor
-.\.venv\Scripts\python.exe tests/smoke_movie.py
-```
-
-Adapt the smoke fixture/backend selection if it assumes Apple tools. `--skip-ocr` can isolate media processing, but does not establish that Windows OCR works. Prior Mac results in `VALIDATION.md` are not Windows validation.
-
-Verify a short real Chinese-subtitled clip, Khmer shaping when subtitles are enabled, complete audio without clipping, output dimensions/duration, browser playback/seeking, corrections, approval invalidation, and export. Run a small authenticated translation and TTS check before any full-movie job, with my authorization for service use. Report unavailable credentials or hardware honestly; do not label skipped checks as passing.
-
-## Start after compatibility checks pass
-
-```powershell
-.\.venv\Scripts\python.exe run.py serve --open-browser
-```
-
-Keep the terminal open. Open http://127.0.0.1:2525 if the browser does not open. For another port use `serve --port 2526 --open-browser`.
-
-In the UI: add movie and cast → generate review → inspect the full movie → save corrections → regenerate affected speech and rebuild → check speakers → approve → export. Queue jobs use `jobs/<movie-id>/output/25method_KhmerDub_1080p.mp4`; the default CLI project exports under `output/`.
-
-## Quality requirements
-
-- Never clip speech to force it into a window; flag overlong lines for correction.
-- Preserve manual speaker review, timing checks, consistent cast voices, and approval/export gating.
-- Export the exact approved review, without an unreviewed rerender.
-- Keep original media read-only and the server local.
-- OCR cannot capture dialogue that has no visible subtitle. Speaker attribution needs human review.
-- Preserve the current dialogue-only audio behavior; original Chinese speech, music, and effects are excluded.
-
-When finished, list the files changed, checks that passed or remain blocked, and the exact Windows launch command. Distinguish a working UI from a verified end-to-end pipeline.
-
-## Prompt to give Gemini
-
-> Read GEMINI.md, README.md, and VALIDATION.md. Inspect this Windows PC and the repository. Implement the compatibility work in GEMINI.md while preserving my media, translations, and review safeguards. Set up a fresh environment, verify the pipeline with a short clip, and create a Windows launcher. Use a translation model available to my account. Do not start full-movie network jobs during setup. Tell me exactly how to launch the app and identify any remaining blockers.
+Speed on a 6-core CPU: about 45 minutes of OCR plus about 2 hours of rendering per hour of video. With a recent NVIDIA driver,
+setting `TTSKH_VIDEO_ENCODER=h264_nvenc` renders much faster.
