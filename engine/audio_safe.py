@@ -38,7 +38,7 @@ def check_fit(cues, clips, duration):
 def build(cues, clips, output, duration):
     output = Path(output)
     issues = check_fit(cues, clips, duration)
-    (output.parent / 'audio_issues.json').write_text(json.dumps(issues, ensure_ascii=False, indent=2))
+    (output.parent / 'audio_issues.json').write_text(json.dumps(issues, ensure_ascii=False, indent=2), encoding='utf-8')
     fatal = [i for i in issues if i.get('kind') == 'missing_audio']
     if fatal:
         raise ValueError(f'{len(fatal)} missing audio files must be corrected; see audio_issues.json')

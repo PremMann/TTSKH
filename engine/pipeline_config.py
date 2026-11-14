@@ -20,7 +20,7 @@ HOW TO MOVE TO A NEW MACHINE:
 import os
 
 # Guarantee Homebrew tools (ffmpeg, ffprobe, edge-tts, etc.) are always in PATH
-if "/opt/homebrew/bin" not in os.environ.get("PATH", ""):
+if os.name != "nt" and "/opt/homebrew/bin" not in os.environ.get("PATH", ""):
     os.environ["PATH"] = f"/opt/homebrew/bin:/usr/local/bin:{os.environ.get('PATH', '')}"
 
 from pathlib import Path

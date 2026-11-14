@@ -12,13 +12,13 @@ class TranslationTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as d:
             root=Path(d);raw=root/'raw.json';output=root/'master.json'
             cues=[{'id':i+1,'start':float(i),'end':i+.75,'chinese':text} for i,text in enumerate(['好','不好','你好','你好啊']*4)]
-            raw.write_text(json.dumps(cues))
+            raw.write_text(json.dumps(cues),encoding='utf-8')
             seen=[]
             def batch(entries,index,total,context=None):
                 seen.append((entries,context));return entries
             with patch.multiple(translate,SAMPLE15M_PATH=None,RAW_VISUAL_PATH=str(raw),MASTER_OUT_PATH=str(output),CACHE_DIR=str(root/'cache')),patch.object(translate,'translate_batch',side_effect=batch):
                 translate.main()
-            result=json.loads(output.read_text())
+            result=json.loads(output.read_text(encoding='utf-8'))
             self.assertEqual([c['chinese'] for c in result],[c['chinese'] for c in cues])
             self.assertEqual([c['original_ids'] for c in result],[[i+1] for i in range(16)])
             self.assertTrue(all(context for _,context in seen))

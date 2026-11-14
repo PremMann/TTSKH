@@ -12,7 +12,25 @@ import sys
 ROOT = Path(__file__).resolve().parent
 ENGINE = ROOT / 'engine'
 sys.path.insert(0, str(ENGINE))
-os.environ['PATH'] = '/Applications/Gemini.app/Contents/Helpers:/Users/premmann/.local/bin:/opt/homebrew/bin:/usr/local/bin:' + os.environ.get('PATH','')
+MAC = sys.platform == 'darwin'
+
+
+def _extend_path():
+    """Add the usual install folders of ffmpeg/agy/edge-tts for this OS to PATH."""
+    home = Path.home()
+    if os.name == 'nt':
+        local = Path(os.environ.get('LOCALAPPDATA', home / 'AppData' / 'Local'))
+        extra = [local / 'agy' / 'bin', home / '.local' / 'bin', Path(sys.executable).parent]
+    else:
+        extra = [Path('/Applications/Gemini.app/Contents/Helpers'), home / '.local' / 'bin',
+                 Path('/opt/homebrew/bin'), Path('/usr/local/bin')]
+    current = os.environ.get('PATH', '')
+    add = [str(p) for p in extra if p.is_dir() and str(p) not in current]
+    if add:
+        os.environ['PATH'] = os.pathsep.join(add + [current])
+
+
+_extend_path()
 VOICES = ('km-KH-PisethNeural', 'km-KH-SreymomNeural')
 
 
@@ -20,8 +38,20 @@ def atomic(file, value):
     file = Path(file)
     file.parent.mkdir(parents=True, exist_ok=True)
     temp = file.with_suffix(file.suffix + '.pending')
-    temp.write_text(json.dumps(value, ensure_ascii=False, indent=2))
+    temp.write_text(json.dumps(value, ensure_ascii=False, indent=2), encoding='utf-8')
     temp.replace(file)
+
+
+def replace_when_free(source, target, attempts=10):
+    """os.replace that waits for Windows to release a target that is open in a player."""
+    import time
+    for attempt in range(attempts):
+        try:
+            return Path(source).replace(target)
+        except PermissionError:
+            if attempt == attempts-1:
+                raise PermissionError(f'{Path(target).name} is open in another program (video player or browser). Close it and run the step again.')
+            time.sleep(1)
 
 
 def validate(cues, duration=None):
@@ -69,16 +99,51 @@ def compile_swift(name):
     return binary
 
 
+def use_swift():
+    """Apple Vision/CoreText engines on a Mac with swiftc; Python engines everywhere else."""
+    return MAC and os.environ.get('TTSKH_ENGINE') != 'python' and bool(shutil.which('swiftc'))
+
+
+def ocr_engine():
+    """Return (command, source file) of the OCR engine for this machine."""
+    if use_swift():
+        return [str(compile_swift('auto_extract_timeline'))], ENGINE/'auto_extract_timeline.swift'
+    script = ENGINE/'ocr_timeline.py'
+    return [sys.executable, str(script)], script
+
+
+def subtitle_engine():
+    if use_swift():
+        return [str(compile_swift('render_subs_universal'))]
+    return [sys.executable, str(ENGINE/'render_subs.py')]
+
+
 class Project:
     def __init__(self, config=ROOT/'project.json'):
         self.config = Path(config).resolve()
         self.home = self.config.parent
-        self.cfg = json.loads(self.config.read_text())
+        self.cfg = json.loads(self.config.read_text(encoding='utf-8'))
         self.work = self.home/'work'
         self.work.mkdir(exist_ok=True)
         self.cues_file = self.work/'all_cues_master.json'
-        self.preview = self.work/'review.mp4'
         self.clips = self.work/'tts'
+    @property
+    def preview(self):
+        """Current review movie. Each rebuild writes a new file, because on Windows the
+        review that is playing in the browser cannot be replaced while it is open."""
+        stamp=self.work/'preview.json'
+        if stamp.exists():
+            try:
+                name=json.loads(stamp.read_text(encoding='utf-8')).get('file')
+                if name: return self.work/name
+            except (ValueError,OSError): pass
+        return self.work/'review.mp4'
+    def remove_old_reviews(self):
+        current=self.preview.name
+        for old in list(self.work.glob('review_*.mp4'))+[self.work/'review.mp4']:
+            if old.name!=current and old.exists():
+                try: old.unlink()
+                except OSError: pass   # still open in a player; removed after the next rebuild
     def path(self, value):
         p=Path(value)
         return p if p.is_absolute() else self.home/p
@@ -89,7 +154,7 @@ class Project:
         duration=float(result)
         if not math.isfinite(duration) or duration <= 0: raise ValueError('Invalid source duration')
         return duration
-    def cues(self): return json.loads(self.cues_file.read_text())
+    def cues(self): return json.loads(self.cues_file.read_text(encoding='utf-8'))
     def digest(self):
         h=hashlib.sha256(json.dumps([{k:v for k,v in c.items() if k != 'speaker_reviewed'} for c in self.cues()],sort_keys=True).encode())
         h.update(json.dumps(self.cfg,sort_keys=True).encode())
@@ -123,23 +188,23 @@ class Project:
             if len(c.get('khmer_sub',''))>85:
                 result.append({'id':c['id'],'kind':'subtitle','message':'Long subtitle: check readability in playback.'})
         report=self.work/'audio_issues.json'
-        if report.exists(): result.extend(json.loads(report.read_text()))
+        if report.exists(): result.extend(json.loads(report.read_text(encoding='utf-8')))
         return result
     def ocr(self):
         st=self.source.stat()
-        identity=[str(self.source),st.st_size,st.st_mtime_ns,self.cfg['ocr_workers'],self.cfg['ocr_y_min'],self.cfg['ocr_y_max'],hashlib.sha256((ENGINE/'auto_extract_timeline.swift').read_bytes()).hexdigest()]
+        command,engine_source=ocr_engine()
+        identity=[str(self.source),st.st_size,st.st_mtime_ns,self.cfg['ocr_workers'],self.cfg['ocr_y_min'],self.cfg['ocr_y_max'],hashlib.sha256(engine_source.read_bytes()).hexdigest()]
         stamp=self.work/'ocr_input.json'
-        if stamp.exists() and json.loads(stamp.read_text()) != identity:
+        if stamp.exists() and json.loads(stamp.read_text(encoding='utf-8')) != identity:
             # Preserve previous extraction and its caches instead of reusing stale work.
             import time
             old=self.work/f'ocr_archive_{time.time_ns()}';old.mkdir()
             for f in ['ocr_chunks','full_visual_cues_raw.json']:
                 if (self.work/f).exists(): shutil.move(str(self.work/f),str(old/f))
         atomic(stamp,identity)
-        compile_swift('auto_extract_timeline')
         from parallel_extract_full_timeline import extract_full_timeline
-        extract_full_timeline(str(self.source),str(self.work/'full_visual_cues_raw.json'),self.cfg['ocr_workers'],self.cfg['ocr_y_min'],self.cfg['ocr_y_max'])
-        bands=[json.loads(f.read_text()) for f in (self.work/'ocr_chunks').glob('*.band.json')]
+        extract_full_timeline(str(self.source),str(self.work/'full_visual_cues_raw.json'),self.cfg['ocr_workers'],self.cfg['ocr_y_min'],self.cfg['ocr_y_max'],ocr_command=command)
+        bands=[json.loads(f.read_text(encoding='utf-8')) for f in (self.work/'ocr_chunks').glob('*.band.json')]
         if bands:
             top=min(b['y'] for b in bands);bottom=max(b['y']+b['height'] for b in bands)
             atomic(self.work/'blur_suggestion.json',{'y':top,'height':bottom-top})
@@ -147,14 +212,14 @@ class Project:
     def translate(self):
         import translate
         translate.SAMPLE15M_PATH=str(self.path(self.cfg['curated_cues'])) if self.cfg.get('curated_cues') else None
-        if translate.SAMPLE15M_PATH: validate(json.loads(Path(translate.SAMPLE15M_PATH).read_text()),self.duration())
+        if translate.SAMPLE15M_PATH: validate(json.loads(Path(translate.SAMPLE15M_PATH).read_text(encoding='utf-8')),self.duration())
         translate.RAW_VISUAL_PATH=str(self.work/'full_visual_cues_raw.json')
         translate.CACHE_DIR=str(self.work/'scene_cache')
         translate.MASTER_OUT_PATH=str(self.work/'translated_draft.json')
-        translate.DRAMA_INSTRUCTIONS=self.path(self.cfg['character_prompt']).read_text()
+        translate.DRAMA_INSTRUCTIONS=self.path(self.cfg['character_prompt']).read_text(encoding='utf-8')
         translate.MODEL=self.cfg['model']
         translate.main()
-        cues=json.loads(Path(translate.MASTER_OUT_PATH).read_text())
+        cues=json.loads(Path(translate.MASTER_OUT_PATH).read_text(encoding='utf-8'))
         # Fix each character's initial casting to its first assignment, reviewable in UI.
         cast={}
         for c in cues:
@@ -183,7 +248,7 @@ class Project:
         if y<0 or height<2 or y+height>1920 or y%2 or height%2: raise ValueError('Blur values must be even and inside 1920 pixels')
         subs=self.work/'subtitles'
         if subs.exists(): shutil.rmtree(subs)
-        subprocess.run([str(compile_swift('render_subs_universal')),str(self.cues_file),str(subs),str(y),str(height),str(duration),'1080','1920'],check=True)
+        subprocess.run([*subtitle_engine(),str(self.cues_file),str(subs),str(y),str(height),str(duration),'1080','1920'],check=True)
         watermark=self.path(self.cfg['watermark']) if self.cfg.get('watermark') else self.work/'transparent.png'
         if not self.cfg.get('watermark'): Image.new('RGBA',(2,2)).save(watermark)
         render_subs_flag = bool(self.cfg.get('render_subtitles', False))
@@ -191,17 +256,21 @@ class Project:
             for c in cues:
                 if c.get('khmer_sub') and not (subs/f'cue_{c["id"]:04d}.png').is_file():
                     raise ValueError(f'Subtitle image missing for cue {c["id"]}')
-        pending=self.work/'review_pending.mp4'
-        render_video(str(self.source),str(self.work/'mask.png'),str(subs/'subs_sample.txt'),str(watermark),str(self.work/'master.wav'),str(pending),y,height,duration=duration,already_1080p=True,render_subtitles=render_subs_flag)
+        import time
+        name=f'review_{time.time_ns()}.mp4'
+        pending=self.work/(name+'.pending.mp4')
+        render_video(str(self.source),str(self.work/'mask.png'),str(subs/'subs_sample.txt'),str(watermark),str(self.work/'master.wav'),str(pending),y,height,duration=duration,already_1080p=True,render_subtitles=render_subs_flag,progress_path=str(self.work/'render_progress.txt'))
         from qa_check import check_qa
         if not check_qa(str(self.cues_file),str(self.clips),str(self.work/'master.wav'),str(pending)):
+            pending.unlink(missing_ok=True)
             raise ValueError('Final playback/audio QA failed; see task log')
-        pending.replace(self.preview)
-        atomic(self.work/'preview.json',{'digest':self.digest()})
+        pending.replace(self.work/name)
+        atomic(self.work/'preview.json',{'digest':self.digest(),'file':name})
+        self.remove_old_reviews()
     def approve(self):
         validate(self.cues(),self.duration())
         stamp=self.work/'preview.json'
-        if not self.preview.exists() or not stamp.exists() or json.loads(stamp.read_text())['digest']!=self.digest():
+        if not self.preview.exists() or not stamp.exists() or json.loads(stamp.read_text(encoding='utf-8'))['digest']!=self.digest():
             raise ValueError('Generate and review the full movie after your latest changes before approving')
         if any(i['kind'] in ('speaker','speech_too_long','missing_audio') for i in self.issues()):
             raise ValueError('Confirm speaker assignments and fix speech issues first')
@@ -211,11 +280,11 @@ class Project:
         folder=self.home/'output';folder.mkdir(exist_ok=True)
         pending=folder/'25method_KhmerDub_1080p.pending.mp4'
         shutil.copy2(self.preview,pending)
-        pending.replace(folder/'25method_KhmerDub_1080p.mp4')
+        replace_when_free(pending,folder/'25method_KhmerDub_1080p.mp4')
     def approve_current(self):
         for name in ['approval.json','preview.json']:
             file=self.work/name
-            if not file.exists() or json.loads(file.read_text())['digest']!=self.digest():
+            if not file.exists() or json.loads(file.read_text(encoding='utf-8'))['digest']!=self.digest():
                 raise ValueError('The current full review movie must be approved before export')
         if not self.preview.exists(): raise ValueError('Review movie missing')
     def prepare(self):

@@ -1,0 +1,17 @@
+Translate these Chinese drama subtitles into natural colloquial Cambodian drama dubbing dialogue (ភាសានិយាយរឿងភាគធម្មជាតិ).
+Story: (one or two sentences about the story, e.g. "A woman returns from abroad and meets her ex-husband again.")
+
+Main Characters (use EXACTLY these speaker names, in English, every time):
+- (Name) (中文名 / nicknames): (role, personality)
+  -> Voice: km-KH-SreymomNeural, pitch: +0Hz, rate: +12%
+- (Name) (中文名 / nicknames): (role, personality)
+  -> Voice: km-KH-PisethNeural, pitch: +0Hz, rate: +10%
+Other men -> km-KH-PisethNeural (older men pitch -4Hz). Other women -> km-KH-SreymomNeural (older women -3Hz, girls +4Hz).
+
+RULES:
+1. Translate into authentic spoken Khmer drama dialogue (colloquial, emotional, punchy). Never literal word-for-word translation.
+2. Speaker must be one of the names above, a role such as Mother or Father, or Unknown. Never write names in Chinese.
+3. Every speaker always keeps the same voice, pitch and rate.
+4. CONSECUTIVE LINE INTEGRITY: a character speaking several lines in a row keeps the same name, gender and voice.
+5. Return ONLY a valid JSON array of objects with keys: id, speaker, voice, pitch, rate, khmer_spoken, khmer_sub.
+6. No markdown backticks, no explanatory prose.

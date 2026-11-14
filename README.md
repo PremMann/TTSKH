@@ -29,6 +29,26 @@ python run.py serve
 
 The inherited model default is `gemini-3.8-flash-low`. Change it in Story settings to a model available to your agy account. The doctor checks local executables/modules, not authentication or remote availability. Swift binaries are compiled locally when needed; a first compilation can take several minutes.
 
+## Setup on Windows
+
+On Windows the Apple-only parts are replaced automatically:
+
+- OCR: `engine/ocr_timeline.py` (RapidOCR, the PaddleOCR Chinese models on ONNX Runtime) instead of Apple Vision.
+- Subtitle images: `engine/render_subs.py` (FFmpeg libass, which shapes Khmer correctly) instead of CoreText.
+- Video encoding: `libx264`. Set `TTSKH_VIDEO_ENCODER=h264_nvenc` to use an NVIDIA GPU (it needs a recent NVIDIA driver; if it fails the render falls back to libx264).
+
+Install once (PowerShell):
+
+```powershell
+winget install Python.Python.3.12
+winget install Gyan.FFmpeg
+irm https://antigravity.google/cli/install.ps1 | iex   # then run: agy   (to sign in)
+```
+
+Install a Khmer font (Khmer OS Battambang or Kantumruy Pro). Then double-click **Setup_Windows.bat** (creates `.venv`, installs packages, runs the doctor) and afterwards **Start_25method.bat**. Keep the project in a short path such as `C:\TTSKH`; very long paths can break `pip install`.
+
+OCR runs on the CPU and is slower than Apple's Neural Engine. Only the subtitle band is read and unchanged frames are skipped. On Windows at most 4 OCR workers run at once, whatever `ocr_workers` says. Set `TTSKH_SUB_FONT` to a .ttf path to force the subtitle font. On a Mac, `TTSKH_ENGINE=python` uses the same Python engines instead of Swift.
+
 ## Full-movie workflow
 
 1. **Add movie**: enter its full local video path, name, and character descriptions. The default prompt is Movie 25's cast; replace it for another story.

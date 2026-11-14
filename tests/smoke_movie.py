@@ -13,6 +13,14 @@ sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
 from workflow import Project, ROOT, atomic
 
 
+def chinese_font():
+    windir=Path(__import__('os').environ.get('WINDIR','C:/Windows'))/'Fonts'
+    for f in ['/System/Library/Fonts/STHeiti Medium.ttc','/System/Library/Fonts/PingFang.ttc',windir/'msyh.ttc',windir/'simhei.ttf',windir/'simsun.ttc',
+              '/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc','/usr/share/fonts/truetype/wqy/wqy-microhei.ttc']:
+        if Path(f).is_file():return str(f)
+    raise SystemExit('No Chinese font found for the OCR fixture')
+
+
 def main():
     with nullcontext(tempfile.mkdtemp(prefix='25method-smoke-')) as directory:
         root=Path(directory)
@@ -20,17 +28,17 @@ def main():
         frame=Image.new('RGB',(360,640),'#18324b');draw=ImageDraw.Draw(frame)
         draw.rectangle((0,0,180,160),fill='red')
         draw.rectangle((180,0,360,160),fill='lime')
-        font=ImageFont.truetype('/System/Library/Fonts/STHeiti Medium.ttc',48)
+        font=ImageFont.truetype(chinese_font(),48)
         draw.text((156,470),'好',font=font,fill='white')
         frame.save(root/'frame.png')
         subprocess.run(['ffmpeg','-v','error','-y','-loop','1','-i',str(root/'frame.png'),'-t','6','-r','25','-pix_fmt','yuv420p',str(root/'source.mp4')],check=True)
-        cfg=json.loads((ROOT/'project.json').read_text());cfg.update(source='source.mp4',character_prompt='characters.txt',ocr_workers=2,ocr_y_min=450,ocr_y_max=600,blur_y_1080=1380,blur_height_1080=280)
+        cfg=json.loads((ROOT/'project.json').read_text(encoding='utf-8'));cfg.update(source='source.mp4',character_prompt='characters.txt',ocr_workers=2,ocr_y_min=450,ocr_y_max=600,blur_y_1080=1380,blur_height_1080=280)
         (root/'characters.txt').write_text('Fixture only')
         atomic(root/'project.json',cfg)
         p=Project(root/'project.json')
         if '--skip-ocr' not in sys.argv:
             p.ocr()
-            raw=json.loads((p.work/'full_visual_cues_raw.json').read_text())
+            raw=json.loads((p.work/'full_visual_cues_raw.json').read_text(encoding='utf-8'))
             assert any(c['chinese']=='好' for c in raw),raw
             assert all(c['end']<=6 for c in raw)
         else:
@@ -54,8 +62,8 @@ def main():
         subprocess.run(['ffmpeg','-v','error','-y','-ss','1','-i',str(final),'-frames:v','1',str(root/'result.png')],check=True)
         picture=Image.open(root/'result.png');r,g,b=picture.getpixel((100,950));assert r>g*2 and r>b*2,(r,g,b)
         r,g,b=picture.getpixel((100,100));assert g>r*2 and g>b*2,(r,g,b)
-        # Persist a non-user fixture frame in /tmp for visual QA only.
-        picture.save('/tmp/25method-smoke-render.png')
+        # Persist a non-user fixture frame in the temp folder for visual QA only.
+        picture.save(Path(tempfile.gettempdir())/'25method-smoke-render.png')
         print('PASS: full audio, Khmer subtitle rendering, 270-degree rotation, 1080p/48kHz playback, approval and export')
 
 if __name__=='__main__':main()

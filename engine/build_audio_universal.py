@@ -16,7 +16,7 @@ import json
 import os
 import sys
 
-if "/opt/homebrew/bin" not in os.environ.get("PATH", ""):
+if os.name != "nt" and "/opt/homebrew/bin" not in os.environ.get("PATH", ""):
     os.environ["PATH"] = f"/opt/homebrew/bin:/usr/local/bin:{os.environ.get('PATH', '')}"
 
 import subprocess

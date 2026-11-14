@@ -42,7 +42,7 @@ def probe_video_dimensions(video_path):
 
 def render_video(video_in, mask_png, sub_concat, watermark_png, audio_in, output_mp4,
                  raw_y_min, raw_blur_h=120.0, duration=300, target_h=1080, already_1080p=False,
-                 render_subtitles=False, dynamic_blur_path=None):
+                 render_subtitles=False, dynamic_blur_path=None, progress_path=None):
     os.makedirs(os.path.dirname(os.path.abspath(output_mp4)), exist_ok=True)
 
     src_w, src_h = probe_video_dimensions(video_in)
@@ -86,7 +86,7 @@ def render_video(video_in, mask_png, sub_concat, watermark_png, audio_in, output
     y_expression = str(y_min)
     if dynamic_blur_path and os.path.exists(dynamic_blur_path):
         from core.dynamic_blur import blur_expressions
-        with open(dynamic_blur_path) as file:
+        with open(dynamic_blur_path, encoding='utf-8') as file:
             track = json.load(file)
         blur_h, y_expression = blur_expressions(track, ph, pw / 720)
         print(f"[*] Applying {track.get('mode')} blur track")
@@ -138,10 +138,13 @@ def render_video(video_in, mask_png, sub_concat, watermark_png, audio_in, output
         f"[v_rot][3:v]overlay=x='(W-w)/2+sin(t*0.45)*(W-w)*0.45':y='(H-h)/2+cos(t*0.65)*(H-h)*0.40'[v_out]"
     )
 
+    # Mac: VideoToolbox. Elsewhere: libx264, or TTSKH_VIDEO_ENCODER (e.g. h264_nvenc).
+    encoder = os.environ.get("TTSKH_VIDEO_ENCODER") or ("h264_videotoolbox" if sys.platform == "darwin" else "libx264")
     _time_args = ["-ss", "0", "-t", str(duration)] if duration > 0 else ["-ss", "0"]
     cmd = [
         "ffmpeg", "-y",
         "-nostdin",
+        *(["-progress", progress_path, "-stats_period", "2"] if progress_path else []),
         *_time_args, "-i", video_in,
         "-loop", "1", "-i", mask_png,
         *(["-f", "concat", "-safe", "0"] if render_subtitles else ["-loop", "1"]), "-i", sub_concat,
@@ -150,7 +153,8 @@ def render_video(video_in, mask_png, sub_concat, watermark_png, audio_in, output
         "-filter_complex", filter_complex,
         "-map", "[v_out]",
         "-map", "4:a",
-        "-c:v", "h264_videotoolbox",
+        "-c:v", encoder,
+        *(["-preset", "fast"] if encoder == "libx264" else []),
         "-b:v", bitrate,
         "-c:a", "aac",
         "-b:a", AUDIO_BITRATE,
@@ -161,13 +165,17 @@ def render_video(video_in, mask_png, sub_concat, watermark_png, audio_in, output
         output_mp4
     ]
 
-    print(f"[*] Rendering {lw}x{lh} ({target_h}p) 270-degree rotated landscape video with VideoToolbox to {output_mp4}...")
+    print(f"[*] Rendering {lw}x{lh} ({target_h}p) 270-degree rotated landscape video with {encoder} to {output_mp4}...")
     t0 = time.time()
-    result = subprocess.run(cmd, capture_output=True, text=True)
+    result = subprocess.run(cmd, capture_output=True, text=True, encoding='utf-8', errors='replace')
+    if result.returncode and encoder != "libx264":
+        print(f"[!] {encoder} unavailable; retrying with software H.264 (libx264)")
+        i = cmd.index(encoder)
+        cmd[i:i + 1] = ["libx264", "-preset", "fast"]
+        result = subprocess.run(cmd, capture_output=True, text=True, encoding='utf-8', errors='replace')
     if result.returncode:
-        print("[!] VideoToolbox unavailable; retrying with software H.264")
-        cmd[cmd.index('h264_videotoolbox')] = 'libx264'
-        subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+        print(result.stderr[-3000:])
+        raise subprocess.CalledProcessError(result.returncode, cmd[:1], stderr=result.stderr)
     print(f"[+] Rendered in {time.time()-t0:.1f}s: {output_mp4}")
     return output_mp4
 

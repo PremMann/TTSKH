@@ -21,7 +21,19 @@ import difflib
 import subprocess
 import sys
 import time
-os.environ['PATH'] = '/Applications/Gemini.app/Contents/Helpers:/Users/premmann/.local/bin:/opt/homebrew/bin:/usr/local/bin:' + os.environ.get('PATH','')
+if sys.platform == 'darwin':
+    _extra = ['/Applications/Gemini.app/Contents/Helpers', os.path.expanduser('~/.local/bin'), '/opt/homebrew/bin', '/usr/local/bin']
+elif os.name == 'nt':
+    _extra = [os.path.join(os.environ.get('LOCALAPPDATA', os.path.expanduser('~\\AppData\\Local')), 'agy', 'bin')]
+else:
+    _extra = [os.path.expanduser('~/.local/bin')]
+os.environ['PATH'] = os.pathsep.join([p for p in _extra if os.path.isdir(p)] + [os.environ.get('PATH', '')])
+
+
+def agy_command():
+    """Full path of agy (on Windows it may be agy.exe or an agy.cmd shim)."""
+    import shutil
+    return shutil.which('agy') or 'agy'
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 MOVIE_DIR = os.path.join(BASE_DIR, "25_yan_lu")
@@ -87,7 +99,7 @@ def translate_batch(batch_cues, batch_idx, total_batches, context=None):
     print(f"[{batch_idx}/{total_batches}] Translating scene ({len(batch_cues)} cues: IDs {batch_cues[0]['id']}..{batch_cues[-1]['id']})...")
 
     cmd = [
-        'agy',
+        agy_command(),
         '--model', MODEL,
         '--disable-slash-commands',
         '--print',
@@ -95,7 +107,7 @@ def translate_batch(batch_cues, batch_idx, total_batches, context=None):
     ]
     for attempt in range(3):
         try:
-            res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=90)
+            res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, encoding='utf-8', errors='replace', timeout=90)
             res.check_returncode()
             data = extract_json_from_output(res.stdout)
             if data and len(data) == len(batch_cues) and [d.get("id") for d in data] == [c["id"] for c in batch_cues] and all(d.get("is_spoken_dialogue") is False or (d.get("khmer_spoken", "").strip() and d.get("speaker", "").strip() and d.get("voice") in ("km-KH-PisethNeural", "km-KH-SreymomNeural")) for d in data):
@@ -146,7 +158,7 @@ def main():
 
     # 1. Load verified 15-minute cues (1 to 142)
     os.makedirs(CACHE_DIR, exist_ok=True)
-    verified_15m = json.load(open(SAMPLE15M_PATH)) if SAMPLE15M_PATH else []
+    verified_15m = json.load(open(SAMPLE15M_PATH, encoding='utf-8')) if SAMPLE15M_PATH else []
     cutoff = max((c["end"] for c in verified_15m), default=0)
     print(f"Loaded {len(verified_15m)} curated cues; continuing from {cutoff}s")
 
